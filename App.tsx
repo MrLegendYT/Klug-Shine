@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { 
@@ -6,25 +5,6 @@ import {
   X, Coins, TrendingUp, ShieldCheck, ExternalLink, AlertCircle, Mail, Key, Youtube, BarChart3, RefreshCw, LayoutGrid, ArrowRight, SkipForward, Loader2, Sparkles, Check, Upload, Image as ImageIcon
 } from 'lucide-react';
 import { auth, db, API_KEY, increment } from './services/firebase';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged, 
-  updateProfile 
-} from 'firebase/auth';
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  addDoc, 
-  getDocs, 
-  query, 
-  where,
-  onSnapshot
-} from 'firebase/firestore';
 
 import { UserProfile, Task, TaskType, Campaign } from './types';
 import { verifyTaskCompletion } from './services/mockBackend';
@@ -32,7 +12,7 @@ import { verifyTaskCompletion } from './services/mockBackend';
 // --- Error Boundary ---
 
 interface ErrorBoundaryProps {
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -40,12 +20,8 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false, error: null };
-
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-  }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -144,12 +120,12 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean; onCl
 
         // 2. Create Auth User
         setStatusMsg('Creating Account...');
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
         const user = userCredential.user;
         if (!user) throw new Error("Failed to create user");
 
         // 3. Update Profile
-        await updateProfile(user, {
+        await user.updateProfile({
           displayName: channelName,
           photoURL: photoURL
         });
@@ -171,19 +147,19 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean; onCl
           subscriberCount: 0
         };
         
-        await setDoc(doc(db, 'users', user.uid), newUser);
+        await db.collection('users').doc(user.uid).set(newUser);
         onLoginSuccess(newUser);
       } else {
         // Login Flow
         setStatusMsg('Signing In...');
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
         const user = userCredential.user;
 
         if (!user) throw new Error("Failed to sign in");
 
-        const userSnap = await getDoc(doc(db, 'users', user.uid));
+        const userSnap = await db.collection('users').doc(user.uid).get();
 
-        if (userSnap.exists()) {
+        if (userSnap.exists) {
           onLoginSuccess(userSnap.data() as UserProfile);
         } else {
           throw new Error("User profile not found. Please sign up.");
@@ -373,7 +349,7 @@ const Navbar = ({ user, points, onLoginClick }: { user: UserProfile | null, poin
                   <span className="font-bold text-brand-100">{points}</span>
                 </div>
                 <div className="lg:hidden">
-                    <button onClick={() => signOut(auth)} className="text-slate-400 hover:text-white transition-colors">
+                    <button onClick={() => auth.signOut()} className="text-slate-400 hover:text-white transition-colors">
                         <LogOut className="h-6 w-6" />
                     </button>
                 </div>
@@ -425,7 +401,7 @@ const BottomNav = ({ user, onLoginClick }: { user: UserProfile | null, onLoginCl
         
         {user ? (
           <button 
-            onClick={() => signOut(auth)} 
+            onClick={() => auth.signOut()} 
             className="flex flex-col items-center justify-center w-full h-full space-y-1.5 text-slate-500 hover:text-red-400 transition-colors"
           >
              <LogOut className="h-7 w-7" />
@@ -490,7 +466,7 @@ const SidebarNav = ({ user, points, onLoginClick }: { user: UserProfile | null, 
         )}
 
         {user ? (
-          <button onClick={() => signOut(auth)} className="relative group w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center hover:bg-slate-700 transition-colors">
+          <button onClick={() => auth.signOut()} className="relative group w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center hover:bg-slate-700 transition-colors">
              <LogOut className="w-5 h-5 text-slate-400 group-hover:text-red-400" />
              <div className="absolute left-14 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none text-xs font-bold text-white top-2">
                 Sign Out
@@ -682,23 +658,25 @@ const Dashboard = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =
     // Real-time listener for campaigns
     if (user.uid.startsWith('mock-user')) return;
 
-    const q = query(collection(db, "campaigns"), where("userId", "==", user.uid));
+    // v8 syntax: db.collection().where()
+    const q = db.collection("campaigns").where("userId", "==", user.uid);
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    // v8 syntax: q.onSnapshot()
+    const unsubscribe = q.onSnapshot((snapshot) => {
        const fetchedCampaigns: (Task & { status: string })[] = [];
        const stats: Record<string, {filled: number, total: number}> = {};
        let active = 0;
        let completed = 0;
        
-       snapshot.docs.forEach((doc) => {
-         const data = doc.data() as Campaign;
+       snapshot.docs.forEach((docSnap) => {
+         const data = docSnap.data() as Campaign;
          
          // Robust completion check: Status is 'completed' OR filled >= requested
          const isFilled = (data.quantityFulfilled || 0) >= data.quantityRequested;
          const derivedStatus = (data.status === 'completed' || isFilled) ? 'completed' : data.status;
 
          fetchedCampaigns.push({
-           id: doc.id,
+           id: docSnap.id,
            type: data.type,
            title: `My ${data.type} Campaign`,
            url: data.targetUrl,
@@ -708,7 +686,7 @@ const Dashboard = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =
            creatorId: data.userId,
            status: derivedStatus
          });
-         stats[doc.id] = { filled: data.quantityFulfilled || 0, total: data.quantityRequested };
+         stats[docSnap.id] = { filled: data.quantityFulfilled || 0, total: data.quantityRequested };
 
          if (derivedStatus === 'active') active++;
          if (derivedStatus === 'completed') completed++;
@@ -802,17 +780,17 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
     setCurrentTask(null);
 
     try {
-      // Fetch active campaigns
-      const q = query(collection(db, "campaigns"), where("status", "==", "active"));
-      const snapshot = await getDocs(q);
+      // Fetch active campaigns (v8)
+      const q = db.collection("campaigns").where("status", "==", "active");
+      const snapshot = await q.get();
       
       const availableDocs: any[] = [];
       
-      snapshot.forEach((doc) => {
-        const data = doc.data() as Campaign;
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Campaign;
         // Filter out own campaigns and fulfilled ones
         if (data.userId !== user.uid && (data.quantityFulfilled || 0) < data.quantityRequested) {
-           availableDocs.push({ id: doc.id, ...data });
+           availableDocs.push({ id: docSnap.id, ...data });
         }
       });
 
@@ -820,12 +798,12 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
          // Select random
          const randomDoc = availableDocs[Math.floor(Math.random() * availableDocs.length)];
          
-         // Fetch Creator Details
-         const creatorSnap = await getDoc(doc(db, 'users', randomDoc.userId));
+         // Fetch Creator Details (v8)
+         const creatorSnap = await db.collection('users').doc(randomDoc.userId).get();
          let creatorName = 'Fellow Creator';
          let creatorPic = `https://ui-avatars.com/api/?name=${randomDoc.userId}&background=random`;
 
-         if (creatorSnap.exists()) {
+         if (creatorSnap.exists) {
              const creatorData = creatorSnap.data() as UserProfile;
              creatorName = creatorData.displayName || creatorName;
              creatorPic = creatorData.photoURL || creatorPic;
@@ -871,19 +849,19 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
     try {
       const success = await verifyTaskCompletion(currentTask.id, currentTask.type);
       if (success) {
-        // 1. Award Points to User
-        const userRef = doc(db, 'users', user.uid);
-        await updateDoc(userRef, {
+        // 1. Award Points to User (v8)
+        const userRef = db.collection('users').doc(user.uid);
+        await userRef.update({
           points: increment(currentTask.reward),
           tasksCompleted: increment(1),
           questCredits: increment(1) 
         });
 
-        // 2. Update Campaign Stats (Decrement from pool effectively)
-        const campaignRef = doc(db, 'campaigns', currentTask.id);
-        const campaignSnap = await getDoc(campaignRef);
+        // 2. Update Campaign Stats (Decrement from pool effectively) (v8)
+        const campaignRef = db.collection('campaigns').doc(currentTask.id);
+        const campaignSnap = await campaignRef.get();
         
-        if (campaignSnap.exists()) {
+        if (campaignSnap.exists) {
             const campData = campaignSnap.data() as Campaign;
             const newFulfilled = (campData.quantityFulfilled || 0) + 1;
             const updates: any = { quantityFulfilled: newFulfilled };
@@ -892,7 +870,7 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
             if (newFulfilled >= campData.quantityRequested) {
                 updates.status = 'completed';
             }
-            await updateDoc(campaignRef, updates);
+            await campaignRef.update(updates);
         }
 
         refreshUser();
@@ -1032,12 +1010,14 @@ const PromotePage = ({ user, refreshUser }: { user: UserProfile, refreshUser: ()
 
     setLoading(true);
     try {
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
+      // v8: db.collection().doc().update()
+      const userRef = db.collection('users').doc(user.uid);
+      await userRef.update({
         points: increment(-cost)
       });
 
-      await addDoc(collection(db, 'campaigns'), {
+      // v8: db.collection().add()
+      await db.collection('campaigns').add({
         userId: user.uid,
         type,
         targetUrl: url,
@@ -1143,13 +1123,15 @@ function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    // v8 syntax: auth.onAuthStateChanged
+    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
         // Fetch user data
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const userSnap = await getDoc(userDocRef);
+        // v8 syntax: db.collection('users').doc(uid).get()
+        const userDocRef = db.collection('users').doc(firebaseUser.uid);
+        const userSnap = await userDocRef.get();
 
-        if (userSnap.exists()) {
+        if (userSnap.exists) {
           setUser(userSnap.data() as UserProfile);
         } else {
           // If no doc exists yet (unlikely with new flow, but safe fallback)
@@ -1181,9 +1163,9 @@ function App() {
     if (user.uid.startsWith('mock-user')) {
        return;
     }
-    const userDocRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userDocRef);
-    if (userSnap.exists()) {
+    const userDocRef = db.collection('users').doc(user.uid);
+    const userSnap = await userDocRef.get();
+    if (userSnap.exists) {
       setUser(userSnap.data() as UserProfile);
     }
   };

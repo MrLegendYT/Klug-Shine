@@ -1,7 +1,7 @@
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore, increment as firestoreIncrement } from "firebase/firestore";
-import { getAnalytics } from "firebase/analytics";
+import firebase from "firebase/compat/app";
+import "firebase/compat/auth";
+import "firebase/compat/firestore";
+import "firebase/compat/analytics";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDRtc-t1Fe1vmXXRGQOtU5kNmaa0J8QLiI",
@@ -15,14 +15,18 @@ const firebaseConfig = {
 
 export const API_KEY = firebaseConfig.apiKey;
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase (check if already initialized for hot-reload safety)
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const analytics = getAnalytics(app);
+const app = firebase.app();
+
+export const auth = firebase.auth();
+export const db = firebase.firestore();
+export const analytics = firebase.analytics();
 
 // Re-export increment for convenience
-export const increment = firestoreIncrement;
+export const increment = firebase.firestore.FieldValue.increment;
 
 export default app;
