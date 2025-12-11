@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { HashRouter, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { 
   Home as HomeIcon, PlayCircle, ThumbsUp, User as UserIcon, LogOut, 
@@ -27,7 +27,58 @@ import {
 } from 'firebase/firestore';
 
 import { UserProfile, Task, TaskType, Campaign } from './types';
-import { verifyTaskCompletion, fetchYouTubeChannelData } from './services/mockBackend';
+import { verifyTaskCompletion } from './services/mockBackend';
+
+// --- Error Boundary ---
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white p-4">
+          <div className="bg-red-900/20 border border-red-500 rounded-2xl p-8 max-w-lg text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h1 className="text-xl font-bold mb-2">Something went wrong</h1>
+            <p className="text-slate-300 mb-4 text-sm">Please refresh the page or try again later.</p>
+            <pre className="bg-black/50 p-4 rounded text-left text-xs font-mono overflow-auto max-h-40 text-red-300">
+              {this.state.error?.toString()}
+            </pre>
+            <button 
+              onClick={() => window.location.reload()}
+              className="mt-6 bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-bold transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // --- Utilities ---
 
@@ -186,7 +237,6 @@ const LoginModal = ({ isOpen, onClose, onLoginSuccess }: { isOpen: boolean; onCl
         <form onSubmit={handleAuth} className="space-y-4">
           {isSignup && (
             <>
-               {/* Image Upload */}
                <div className="flex flex-col items-center mb-4">
                 <label className="relative cursor-pointer group">
                   <div className={`w-24 h-24 rounded-full border-2 flex items-center justify-center overflow-hidden ${previewUrl ? 'border-brand-500' : 'border-dashed border-slate-600 bg-slate-900 hover:border-brand-400'}`}>
@@ -1145,35 +1195,37 @@ function App() {
   );
 
   return (
-    <HashRouter>
-      <div className="min-h-screen bg-slate-950 font-sans text-gray-100 selection:bg-brand-500 selection:text-white">
-        <Navbar 
-          user={user} 
-          points={user?.points || 0} 
-          onLoginClick={() => setShowLoginModal(true)}
-        />
-        
-        {/* Desktop Sidebar Nav */}
-        <SidebarNav user={user} points={user?.points || 0} onLoginClick={() => setShowLoginModal(true)} />
-        
-        {/* Mobile Bottom Nav */}
-        <BottomNav user={user} onLoginClick={() => setShowLoginModal(true)} />
+    <ErrorBoundary>
+      <HashRouter>
+        <div className="min-h-screen bg-slate-950 font-sans text-gray-100 selection:bg-brand-500 selection:text-white">
+          <Navbar 
+            user={user} 
+            points={user?.points || 0} 
+            onLoginClick={() => setShowLoginModal(true)}
+          />
+          
+          {/* Desktop Sidebar Nav */}
+          <SidebarNav user={user} points={user?.points || 0} onLoginClick={() => setShowLoginModal(true)} />
+          
+          {/* Mobile Bottom Nav */}
+          <BottomNav user={user} onLoginClick={() => setShowLoginModal(true)} />
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative lg:pl-24 transition-all duration-300">
-          <Routes>
-            <Route path="/" element={user ? <Dashboard user={user} refreshUser={refreshUser} /> : <LandingPage onLoginClick={() => setShowLoginModal(true)} />} />
-            <Route path="/earn" element={user ? <EarnPage user={user} refreshUser={refreshUser} /> : <Navigate to="/" />} />
-            <Route path="/promote" element={user ? <PromotePage user={user} refreshUser={refreshUser} /> : <Navigate to="/" />} />
-          </Routes>
-        </main>
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative lg:pl-24 transition-all duration-300">
+            <Routes>
+              <Route path="/" element={user ? <Dashboard user={user} refreshUser={refreshUser} /> : <LandingPage onLoginClick={() => setShowLoginModal(true)} />} />
+              <Route path="/earn" element={user ? <EarnPage user={user} refreshUser={refreshUser} /> : <Navigate to="/" />} />
+              <Route path="/promote" element={user ? <PromotePage user={user} refreshUser={refreshUser} /> : <Navigate to="/" />} />
+            </Routes>
+          </main>
 
-        <LoginModal 
-          isOpen={showLoginModal} 
-          onClose={() => setShowLoginModal(false)}
-          onLoginSuccess={(u) => setUser(u)}
-        />
-      </div>
-    </HashRouter>
+          <LoginModal 
+            isOpen={showLoginModal} 
+            onClose={() => setShowLoginModal(false)}
+            onLoginSuccess={(u) => setUser(u)}
+          />
+        </div>
+      </HashRouter>
+    </ErrorBoundary>
   );
 }
 
