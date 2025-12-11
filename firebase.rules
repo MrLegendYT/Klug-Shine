@@ -1,0 +1,67 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- Helper Functions ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Check if the user is an admin by fetching their profile
+    // Uses safe navigation to avoid null pointer errors
+    function isAdmin() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return isSignedIn() && userDoc != null && userDoc.data.get('role', 'user') == 'admin';
+    }
+    
+    // Check if the user is accessing their own document
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- Collections ---
+
+    // 1. Settings (Quest Links & Global Config)
+    match /settings/{document} {
+      allow read: if true; 
+      allow write: if isAdmin();
+    }
+
+    // 2. User Profiles
+    match /users/{userId} {
+      // Admins need to read ALL users to populate the management table
+      // isOwner only allows reading own doc
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isOwner(userId);
+      
+      // Update Rules:
+      // - Admins can update any user
+      // - Users can update themselves IF:
+      //   1. They are NOT changing their role (role remains same)
+      //   2. OR They are providing the correct adminSecret to promote themselves
+      allow update: if isAdmin() || 
+                    (isOwner(userId) && (
+                      request.resource.data.get('role', 'user') == resource.data.get('role', 'user') || 
+                      request.resource.data.get('adminSecret', '') == "ILOVEIMRANKHAN369"
+                    ));
+    }
+    
+    // 3. Campaigns (Promotions)
+    match /campaigns/{campaignId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // UPDATED: Allow any signed-in user to update (needed for marking tasks as complete/incrementing count)
+      allow update: if isSignedIn();
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+    
+    // 4. Super Tasks (Admin created tasks)
+    match /superTasks/{taskId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
