@@ -22,7 +22,8 @@ import {
   addDoc, 
   getDocs, 
   query, 
-  where 
+  where,
+  onSnapshot
 } from 'firebase/firestore';
 
 import { UserProfile, Task, TaskType, Campaign } from './types';
@@ -628,50 +629,57 @@ const Dashboard = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =
   const [completedCount, setCompletedCount] = useState(0);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch My Active Campaigns
-        if (!user.uid.startsWith('mock-user')) {
-           const campaignSnapshot = await getDocs(query(collection(db, "campaigns"), where("userId", "==", user.uid)));
-           const fetchedCampaigns: (Task & { status: string })[] = [];
-           const stats: Record<string, {filled: number, total: number}> = {};
-           let active = 0;
-           let completed = 0;
-           
-           campaignSnapshot.forEach((doc) => {
-             const data = doc.data() as Campaign;
-             
-             fetchedCampaigns.push({
-               id: doc.id,
-               type: data.type,
-               title: `My ${data.type} Campaign`,
-               url: data.targetUrl,
-               reward: 0,
-               channelName: user.displayName || 'Me',
-               thumbnailUrl: user.photoURL || '',
-               creatorId: data.userId,
-               status: data.status
-             });
-             stats[doc.id] = { filled: data.quantityFulfilled, total: data.quantityRequested };
+    // Real-time listener for campaigns
+    if (user.uid.startsWith('mock-user')) return;
 
-             if (data.status === 'active') active++;
-             if (data.status === 'completed') completed++;
-           });
-           
-           // Sort: Active first
-           fetchedCampaigns.sort((a, b) => (a.status === 'active' ? -1 : 1));
+    const q = query(collection(db, "campaigns"), where("userId", "==", user.uid));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+       const fetchedCampaigns: (Task & { status: string })[] = [];
+       const stats: Record<string, {filled: number, total: number}> = {};
+       let active = 0;
+       let completed = 0;
+       
+       snapshot.docs.forEach((doc) => {
+         const data = doc.data() as Campaign;
+         
+         // Robust completion check: Status is 'completed' OR filled >= requested
+         const isFilled = (data.quantityFulfilled || 0) >= data.quantityRequested;
+         const derivedStatus = (data.status === 'completed' || isFilled) ? 'completed' : data.status;
 
-           setMyCampaigns(fetchedCampaigns);
-           setMyCampaignStats(stats);
-           setActiveCount(active);
-           setCompletedCount(completed);
-        }
-      } catch (err) {
-        console.warn("Error fetching dashboard data:", err);
-      }
-    };
-    fetchData();
-  }, [user.uid, user.photoURL, user.displayName]);
+         fetchedCampaigns.push({
+           id: doc.id,
+           type: data.type,
+           title: `My ${data.type} Campaign`,
+           url: data.targetUrl,
+           reward: 0,
+           channelName: user.displayName || 'Me',
+           thumbnailUrl: user.photoURL || '',
+           creatorId: data.userId,
+           status: derivedStatus
+         });
+         stats[doc.id] = { filled: data.quantityFulfilled || 0, total: data.quantityRequested };
+
+         if (derivedStatus === 'active') active++;
+         if (derivedStatus === 'completed') completed++;
+       });
+       
+       // Sort: Active first, then by creation time (desc) if available, or title
+       fetchedCampaigns.sort((a, b) => {
+         if (a.status === b.status) return 0;
+         return a.status === 'active' ? -1 : 1;
+       });
+
+       setMyCampaigns(fetchedCampaigns);
+       setMyCampaignStats(stats);
+       setActiveCount(active);
+       setCompletedCount(completed);
+    }, (err) => {
+       console.warn("Error fetching dashboard data:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user.uid]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-24">
@@ -687,7 +695,7 @@ const Dashboard = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =
         </div>
         
         <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex flex-col items-center text-center">
-           <div className="w-12 h-12 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mb-3">
+           <div className="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mb-3">
              <Check className="h-6 w-6"/>
            </div>
            <div className="text-3xl font-bold text-white mb-1">{completedCount}</div>
@@ -753,7 +761,7 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
       snapshot.forEach((doc) => {
         const data = doc.data() as Campaign;
         // Filter out own campaigns and fulfilled ones
-        if (data.userId !== user.uid && data.quantityFulfilled < data.quantityRequested) {
+        if (data.userId !== user.uid && (data.quantityFulfilled || 0) < data.quantityRequested) {
            availableDocs.push({ id: doc.id, ...data });
         }
       });
@@ -830,6 +838,7 @@ const EarnPage = ({ user, refreshUser }: { user: UserProfile, refreshUser: () =>
             const newFulfilled = (campData.quantityFulfilled || 0) + 1;
             const updates: any = { quantityFulfilled: newFulfilled };
             
+            // Strictly check if we reached the requested quantity
             if (newFulfilled >= campData.quantityRequested) {
                 updates.status = 'completed';
             }
